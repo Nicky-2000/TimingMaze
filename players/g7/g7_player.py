@@ -13,6 +13,7 @@ from players.g7.player_helper_code import build_graph_from_memory, MazeGraph, Pl
 
 import constants
 from timing_maze_state import TimingMazeState
+from collections import deque
 
 class Player:
     def __init__(self, rng: np.random.Generator, logger: logging.Logger,
@@ -81,11 +82,13 @@ class Player:
         if current_percept.is_end_visible:
             # target_node = (current_percept.end_x, current_percept.end_y)
             target_node = (current_percept.end_y, current_percept.end_x)
+            print("End is visible. Target node set to {target_node}")
 
         else:
             # If the end is not visible, choosing an intermediate node
             target_node = self.choose_intermediate_target_node(current_percept)
-            target_node = (-40, -40)
+            #target_node = (-40, -40)
+            print("End not visible. Intermediate target node set to {target_node}")
 
         # Find shortest paths to the target node
         minDistanceArray, parent = findShortestPathsToEachNode(currentGraph, self.memory.pos, self.turn)
@@ -105,14 +108,27 @@ class Player:
                 print("Desired Next Move is Invalid")
                 move = constants.WAIT
         
-        print(f"Move: {move}")
-        return move
-        # Get the next move from the path
-        # need to ensure invalid turns don't happen
+            print(f"Move: {move}")
+            return move
+            # Get the next move from the path
+            # need to ensure invalid turns don't happen
 
-        
-        # If no valid path found or need to wait
-        # return constants.WAIT
+        else:
+            # If no path found, explore
+            print("No valid path found. Initiating exploration.")
+            exploration_move = self.explore(current_percept)
+            if exploration_move is not None:
+                if self.memory.is_move_valid(exploration_move, current_percept.maze_state):
+                    self.memory.update_pos(exploration_move)
+                    print("Exploration move accepted. New position: {self.memory.pos}")
+                    move = exploration_move
+                else:
+                    print("Exploration move is invalid. Waiting.")
+            else:
+                print("No exploration moves available. Waiting.")
+
+        self.logger.info(f"Turn {self.turn}: Move selected - {move}")
+        return move
 
 
     def choose_intermediate_target_node(self, current_percept): #when goal node is not visible
@@ -161,9 +177,69 @@ class Player:
         # else:
         #     return constants.WAIT
 
-    def get_unexplored_nodes(self, current_percept): #Placeholder 
-        unexplored_nodes = []
-        return unexplored_nodes
+    #Placeholder
+    #def get_unexplored_nodes(self, current_percept):  
+    #    unexplored_nodes = []
+    #    return unexplored_nodes
+
+    def get_unexplored_nodes(self): #based on current memory.
+
+        unexplored = []
+        for y in range(len(self.memory.memory)):
+            for x in range(len(self.memory.memory[0])):
+                node = (y, x)
+                if node not in self.memory.visited and node in self.memory.map:
+                    unexplored.append(node)
+        print("Unexplored nodes found: {unexplored}")
+        return unexplored
+    
+    def explore(self, current_percept) -> int:
+        """Exploration strategy when the target is not visible or reachable.
+
+        Args:
+            current_percept (TimingMazeState): Current state information.
+
+        Returns:
+            int: Direction to move (LEFT, UP, RIGHT, DOWN) or None if no move found.
+        """
+        directions = [constants.LEFT, constants.UP, constants.RIGHT, constants.DOWN]
+        direction_offsets = {
+            constants.LEFT: (0, -1),
+            constants.UP: (-1, 0),
+            constants.RIGHT: (0, 1),
+            constants.DOWN: (1, 0),
+        }
+
+        start_pos = self.memory.pos
+        exploration_queue = deque([start_pos])
+        local_visited = set([start_pos])
+
+        while exploration_queue:
+            current_pos = exploration_queue.popleft()
+
+            for direction in directions:
+                dy, dx = direction_offsets[direction]
+                next_pos = (current_pos[0] + dy, current_pos[1] + dx)
+
+                if next_pos in local_visited or next_pos in self.memory.visited:
+                    continue
+
+                # Check if the move to the next position is valid based on current door state
+                if self.memory.is_move_valid(direction, current_percept.maze_state):
+                    # Mark the node as visited and move towards it
+                    self.memory.visited.add(next_pos)
+                    self.memory.update_pos(direction)
+                    print("Exploration move selected: {direction}, New position: {next_pos}")
+                    return direction
+
+                # If move is not valid, but position is known, add to queue for further exploration
+                if next_pos in self.memory.map and next_pos not in self.memory.visited:
+                    exploration_queue.append(next_pos)
+                    local_visited.add(next_pos)
+
+        # If no exploration moves are possible
+        print("No valid exploration moves found.")
+        return None
 
     
     #def move(self, current_percept) -> int:
