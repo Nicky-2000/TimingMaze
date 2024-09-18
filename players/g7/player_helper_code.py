@@ -15,13 +15,19 @@ class MemoryDoor:
         self.is_certain_freq = False
         self.observations = {} # {turn : 1 - Closed / 2 - Open / 3 - Boundary}
         self.freq_distribution = {}
+        self.is_boundary = False
     
     def is_open(self, turn):
         # Returns if the door is open at a given turn
+        if self.is_boundary:
+            return False
         return self.observations.get(turn, 1) == 2
     
     def update_observations(self, door_state, turn):
         # Updates observed freqs, runs get_freq
+        if door_state == 3:
+            self.is_boundary = True
+        
         if not self.is_certain_freq:
             self.observations[turn] = door_state
             self.freq_distribution = self.get_freq()
@@ -84,6 +90,7 @@ class MemorySquare:
         up = MemoryDoor()
         right = MemoryDoor()
         down = MemoryDoor()
+        self.seen = False
         self.doors = {constants.LEFT:left, constants.UP:up, constants.RIGHT:right, constants.DOWN:down}
 
 class PlayerMemory:
@@ -96,10 +103,34 @@ class PlayerMemory:
         for s in state:
             # if s[0] == -1 and s[1] == 0:
                 # print("ya")
-            square = self.memory[self.pos[0] + s[1]][self.pos[1] + s[0]]
+            square: MemorySquare = self.memory[self.pos[0] + s[1]][self.pos[1] + s[0]]
+            square.seen = True
             door = square.doors[s[2]]
             door_state = s[3]
             door.update_observations(door_state, turn)
+    
+    def get_boundary_coords(self):
+        # returns [left_bound (an x value), right_bound (an x value), up_bound (a y value), down_bound (a y value)]
+        # returns - 1 if an edge is not found
+        bounds = [-1,-1,-1,-1]
+
+        for y in range(len(self.memory)):
+            for x in range(len(self.memory[0])):
+                if all(bounds != -1 for bounds in bounds):
+                    return bounds # We can break early if we have all the bounds
+                if self.memory[y][x].doors[constants.LEFT].is_boundary:
+                    left_bound = bounds[0] = x
+                    right_bound = bounds[1] = x + 99
+                if self.memory[y][x].doors[constants.RIGHT].is_boundary:
+                    right_bound = bounds[1] = x
+                    left_bound = bounds[0] = x - 99
+                if self.memory[y][x].doors[constants.UP].is_boundary:
+                    up_bound = bounds[2] = y
+                    down_bound = bounds[3] = y + 99
+                if self.memory[y][x].doors[constants.DOWN].is_boundary:
+                    down_bound = bounds[3] = y
+                    up_bound = bounds[2] = y - 99
+        return [left_bound, right_bound, up_bound, down_bound]
 
     def update_pos(self, move):
         if move == constants.LEFT:

@@ -47,7 +47,7 @@ class Player:
         self.logger = logger
         self.maximum_door_frequency = maximum_door_frequency
         self.radius = radius
-        self.memory = PlayerMemory()
+        self.memory: PlayerMemory = PlayerMemory()
         self.turn = 0
         self.starting_position_set = False #check
 
@@ -76,7 +76,8 @@ class Player:
         
         # Build the graph from the updated memory
         currentGraph = build_graph_from_memory(self.memory)
-        
+        minDistanceArray, parent = findShortestPathsToEachNode(currentGraph, self.memory.pos, self.turn)
+
         # Determine the go
         # l node
         if current_percept.is_end_visible:
@@ -85,13 +86,11 @@ class Player:
             print("End is visible. Target node set to {target_node}")
 
         else:
-            # If the end is not visible, choosing an intermediate node
-            target_node = self.choose_intermediate_target_node(current_percept)
-            #target_node = (-40, -40)
+            # IF WE ARE HERE THE TARGET IS NOT VISIBLE
+            target_node = self.choose_intermediate_target_node(minDistanceArray)
             print("End not visible. Intermediate target node set to {target_node}")
 
         # Find shortest paths to the target node
-        minDistanceArray, parent = findShortestPathsToEachNode(currentGraph, self.memory.pos, self.turn)
 
         path = reconstruct_path(parent, self.memory.pos, target_node)
 
@@ -114,7 +113,11 @@ class Player:
             # need to ensure invalid turns don't happen
 
         else:
-            # If no path found, explore
+            # IF WE ARE HERE WE CAN SEE THE TARGET BUT CANNOT REACH IT
+            # There are two reasons why we can't create a path
+            # 1. We don't have enough information about the doors since the traversal only considers doors that we know the frequency of
+            # 2. The target is not reachable at all with our knowldge since it is behind a door that we know never opens (I don't think we have this yet)
+
             print("No valid path found. Initiating exploration.")
             exploration_move = self.explore(current_percept)
             if exploration_move is not None:
@@ -131,14 +134,52 @@ class Player:
         return move
 
 
-    def choose_intermediate_target_node(self, current_percept): #when goal node is not visible
+    def choose_intermediate_target_node(self, minDistanceArray): #when goal node is not visible
 
-        unexplored_nodes = self.get_unexplored_nodes(current_percept)
-        if unexplored_nodes:
-            return random.choice(unexplored_nodes)
-        else:
-            # Fallback to current position or some default strategy
-            return self.memory.pos
+        # First lets get information about the boundary. We never want to be right bestide it
+        boundary = self.memory.get_boundary_coords()
+        if any(bound != -1 for bound in boundary):
+            left_bound, right_bound, up_bound, down_bound = boundary
+            # We can see a boundary. Use this and our current position to determine where to go.
+            # Note: If we know the left boundary, we also know the right one (and vice versa). Same for up and down
+            # We should move away from boundary so we can maximize our view.
+            if up_bound > -1 and down_bound > -1:
+                # we know left and right bounds. How far do we want to be from the bounds? radius - 1 maybe?
+                current_y = self.memory.pos[0]
+                distance_to_up_bound = current_y - up_bound
+                distance_to_down_bound = down_bound - current_y
+                
+                if distance_to_up_bound < self.radius - 1: # The plus one is to make sure we see corners
+                    # We are too close to the upper bound. Move down
+                    desired_y = up_bound + self.radius - 1
+                elif distance_to_down_bound < self.radius - 1:
+                    # We are too close to the lower bound. Move up
+                    desired_y = down_bound - self.radius + 1
+
+            if left_bound > -1 and right_bound > -1:
+                # we know left and right bounds. How far do we want to be from the bounds? radius - 1 maybe?
+                current_x = self.memory.pos[1]
+                distance_to_left_bound = current_x - left_bound
+                distance_to_right_bound = right_bound - current_x
+
+                if distance_to_left_bound < self.radius - 1: # The plus one is to make sure we see corners
+                    # We are too close to the left bound. Move right
+                    desired_x = left_bound + self.radius - 1
+                elif distance_to_right_bound < self.radius - 1:
+                    # We are too close to the right bound. Move left
+                    desired_x = right_bound - self.radius + 1
+
+        # If we don't know the boundary, just pick the path that will get us the furtherest from our current position
+        
+
+
+
+        # unexplored_nodes = self.get_unexplored_nodes(current_percept)
+        # if unexplored_nodes:
+        #     return random.choice(unexplored_nodes)
+        # else:
+        #     # Fallback to current position or some default strategy
+        #     return self.memory.pos
 
     def get_move_direction(self, path): #current to next position
         """        
